@@ -14,7 +14,7 @@ require("dotenv").config();
 // ABIs for the contracts
 const interchainTokenServiceContractABI = require("../utils/interchainTokenServiceABI.json");
 const baseRandomDEXTokenABI = require("../utils/RandomDEXABI.json");
-const ethRandomDEXTokenABI = require("../utils/ethRandomDEXTokenABI.json");
+const ethRandomDEXTokenABI = require("../utils/EthRandomDEXABI.json");
 
 // Roles
 const MINT_BURN = 4; // Mint and burn roles on Ethereum side
@@ -27,7 +27,7 @@ const ethRandomDEXTokenAddress = process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS; // 
 
 // Utility to create a signer instance
 async function getSigner(rpcUrl, privateKey) {
-  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
   return new ethers.Wallet(privateKey, provider);
 }
 
@@ -49,9 +49,11 @@ async function deployTokenManagerBase() {
 
     const salt = "0x" + crypto.randomBytes(32).toString("hex");
 
-    const params = ethers.utils.defaultAbiCoder.encode(
+    // Create new AbiCoder instance
+    const abiCoder = new ethers.AbiCoder();
+    const params = abiCoder.encode(
       ["bytes", "address"],
-      [signer.address, baseRandomDEXTokenAddress]
+      [await signer.getAddress(), baseRandomDEXTokenAddress]
     );
 
     const deployTx = await interchainTokenServiceContract.deployTokenManager(
@@ -59,7 +61,7 @@ async function deployTokenManagerBase() {
       "",
       LOCK_UNLOCK,
       params,
-      ethers.utils.parseEther("0.01")
+      ethers.parseEther("0.01")
     );
 
     console.log("Deploy Transaction Hash:", deployTx.hash);
@@ -96,6 +98,41 @@ async function gasEstimator() {
   }
 }
 
+async function gasEstimatorForEth() {
+    try {
+      console.log("Estimating gas from Ethereum to Base...");
+  
+      // Define executeData (empty, since no specific execution is needed on Base)
+      const executeData = "0x";
+  
+      // Provide GMPParams for accurate fee estimation
+      const gmpParams = {
+        destinationContractAddress: process.env.BASE_RECEIVER_ADDRESS, // The receiver address on Base
+        sourceContractAddress: process.env.ETH_SENDER_ADDRESS,         // Optional: The sender's contract address
+        transferAmount: ethers.parseEther("5").toString(),       // Transfer amount in full tokens
+        tokenSymbol: "ETH",                                            // Token being used to pay gas
+      };
+  
+      const gas = await api.estimateGasFee(
+        EvmChain.SEPOLIA,         // Source chain (Ethereum Sepolia)
+        EvmChain.BASE_SEPOLIA,    // Destination chain (Base Sepolia)
+        2000000,                   // Gas limit
+        1.1,                      // Gas multiplier
+        GasToken.ETH,             // Gas token (ETH)
+        "0",                      // Min gas price (default to 0)
+        executeData,              // Explicitly pass executeData
+        gmpParams                 // Pass the GMPParams object
+      );
+  
+      console.log("Estimated Gas (with L1 details):", gas);
+      return gas; // Add a 50% buffer
+    } catch (error) {
+      handleError("Error estimating gas", error);
+      throw error; // Rethrow the error to stop execution
+    }
+}
+  
+
 // Deploy token manager for Ethereum blockchain
 async function deployRemoteTokenManager() {
   try {
@@ -107,9 +144,11 @@ async function deployRemoteTokenManager() {
       signer
     );
 
-    const params = ethers.utils.defaultAbiCoder.encode(
+    // Create new AbiCoder instance
+    const abiCoder = new ethers.AbiCoder();
+    const params = abiCoder.encode(
       ["bytes", "address"],
-      [signer.address, ethRandomDEXTokenAddress]
+      [await signer.getAddress(), ethRandomDEXTokenAddress]
     );
 
     const gasAmount = await gasEstimator();
@@ -185,7 +224,7 @@ async function approveTokensOnBase() {
 
     const approveTx = await tokenContract.approve(
       interchainTokenServiceContractAddress,
-      ethers.utils.parseEther("500")
+      ethers.parseEther("500")
     );
     console.log("Approve Transaction Hash:", approveTx.hash);
   } catch (error) {
@@ -210,7 +249,7 @@ async function transferTokensBaseToEth() {
       process.env.TOKEN_ID,
       "ethereum-sepolia",
       process.env.ETHEREUM_RECEIVER_ADDRESS,
-      ethers.utils.parseEther("10"),
+      ethers.parseEther("10"),
       "0x",
       gasAmount,
       { value: gasAmount }
@@ -219,6 +258,37 @@ async function transferTokensBaseToEth() {
     console.log("Transfer Transaction Hash:", transferTx.hash);
   } catch (error) {
     handleError("Error transferring tokens from Base to Ethereum", error);
+  }
+}
+
+// Transfer tokens from Ethereum to Base
+async function transferTokensEthToBase() {
+  try {
+    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEY);
+
+    const interchainTokenServiceContract = await getContractInstance(
+      interchainTokenServiceContractAddress,
+      interchainTokenServiceContractABI,
+      signer
+    );
+    const gasAmount = await gasEstimatorForEth();
+
+    const transferTx = await interchainTokenServiceContract.interchainTransfer(
+      process.env.TOKEN_ID,
+      "base-sepolia",
+      process.env.BASE_RECEIVER_ADDRESS,
+      ethers.parseEther("5"),
+      "0x",
+      gasAmount,
+      { value: gasAmount,
+        gasLimit: 2000000, // Manually set gas limit for debugging
+
+       }
+    );
+
+    console.log("Transfer Transaction Hash:", transferTx.hash);
+  } catch (error) {
+    handleError("Error transferring tokens from Ethereum to Base", error);
   }
 }
 
@@ -247,6 +317,9 @@ async function main() {
       break;
     case "transferTokensBaseToEth":
       await transferTokensBaseToEth();
+      break;
+    case "transferTokensEthToBase":
+      await transferTokensEthToBase();
       break;
     default:
       console.error(`Unknown function: ${functionName}`);
