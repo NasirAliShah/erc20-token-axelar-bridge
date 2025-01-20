@@ -99,39 +99,38 @@ async function gasEstimator() {
 }
 
 async function gasEstimatorForEth() {
-    try {
-      console.log("Estimating gas from Ethereum to Base...");
-  
-      // Define executeData (empty, since no specific execution is needed on Base)
-      const executeData = "0x";
-  
-      // Provide GMPParams for accurate fee estimation
-      const gmpParams = {
-        destinationContractAddress: process.env.BASE_RECEIVER_ADDRESS, // The receiver address on Base
-        sourceContractAddress: process.env.ETH_SENDER_ADDRESS,         // Optional: The sender's contract address
-        transferAmount: ethers.parseEther("5").toString(),       // Transfer amount in full tokens
-        tokenSymbol: "ETH",                                            // Token being used to pay gas
-      };
-  
-      const gas = await api.estimateGasFee(
-        EvmChain.SEPOLIA,         // Source chain (Ethereum Sepolia)
-        EvmChain.BASE_SEPOLIA,    // Destination chain (Base Sepolia)
-        2000000,                   // Gas limit
-        1.1,                      // Gas multiplier
-        GasToken.ETH,             // Gas token (ETH)
-        "0",                      // Min gas price (default to 0)
-        executeData,              // Explicitly pass executeData
-        gmpParams                 // Pass the GMPParams object
-      );
-  
-      console.log("Estimated Gas (with L1 details):", gas);
-      return gas; // Add a 50% buffer
-    } catch (error) {
-      handleError("Error estimating gas", error);
-      throw error; // Rethrow the error to stop execution
-    }
+  try {
+    console.log("Estimating gas from Ethereum to Base...");
+
+    const executeData = "0x";
+
+    const gmpParams = {
+      destinationContractAddress: process.env.BASE_RECEIVER_ADDRESS,
+      sourceContractAddress: process.env.ETH_SENDER_ADDRESS,
+      tokenSymbol: "ETH",
+      transferAmount: ethers.parseEther("5").toString()
+    };
+
+    const gas = await api.estimateGasFee(
+      EvmChain.SEPOLIA,
+      EvmChain.BASE_SEPOLIA,
+      3000000,  // Increased gas limit
+      1.3,      // Increased multiplier for better estimation
+      GasToken.ETH,
+      "0",
+      executeData,
+      gmpParams
+    );
+
+    console.log("Raw estimated gas:", gas);
+    return gas;
+  } catch (error) {
+    handleError("Error estimating gas", error);
+    console.error("Detailed gas estimation error:", error);
+    throw error;
+  }
 }
-  
+
 
 // Deploy token manager for Ethereum blockchain
 async function deployRemoteTokenManager() {
@@ -264,14 +263,21 @@ async function transferTokensBaseToEth() {
 // Transfer tokens from Ethereum to Base
 async function transferTokensEthToBase() {
   try {
-    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEY);
+    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEYY);
 
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
       interchainTokenServiceContractABI,
       signer
     );
+    // Get gas estimate with proper parameters
     const gasAmount = await gasEstimatorForEth();
+    console.log("Estimated gas amount:", gasAmount);
+
+    // Add 20% buffer to the gas amount
+    const gasWithBuffer = BigInt(gasAmount) + (BigInt(gasAmount) * BigInt(20) / BigInt(100));
+    console.log("Gas amount with buffer:", gasWithBuffer.toString());
+
 
     const transferTx = await interchainTokenServiceContract.interchainTransfer(
       process.env.TOKEN_ID,
@@ -279,14 +285,36 @@ async function transferTokensEthToBase() {
       process.env.BASE_RECEIVER_ADDRESS,
       ethers.parseEther("5"),
       "0x",
-      gasAmount,
-      { value: gasAmount,
-        gasLimit: 2000000, // Manually set gas limit for debugging
+      gasWithBuffer,
+      {
+        value: gasWithBuffer,
+        gasLimit: 3000000, // Manually set gas limit for debugging
 
-       }
+      }
     );
 
     console.log("Transfer Transaction Hash:", transferTx.hash);
+  } catch (error) {
+    handleError("Error transferring tokens from Ethereum to Base", error);
+  }
+}
+async function checkForToken() {
+  try {
+    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEYY);
+
+    const tokenContract = await getContractInstance(
+      process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS,
+      ethRandomDEXTokenABI,
+      signer
+    );
+    const balance = await tokenContract.balanceOf(signer.address);
+    console.log("Balance of token:", balance);
+    // Check allowance
+    const allowance = await tokenContract.allowance(
+      signer.address, // The sender's address
+      process.env.INTERCHAIN_SERVICE_CONTRACT_ADDRESS // The Axelar interchain token service
+    );
+    console.log("Current Allowance:", allowance.toString());
   } catch (error) {
     handleError("Error transferring tokens from Ethereum to Base", error);
   }
@@ -317,6 +345,9 @@ async function main() {
       break;
     case "transferTokensBaseToEth":
       await transferTokensBaseToEth();
+      break;
+    case "checkForToken":
+      await checkForToken();
       break;
     case "transferTokensEthToBase":
       await transferTokensEthToBase();
