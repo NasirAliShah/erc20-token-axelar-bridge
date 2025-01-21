@@ -111,6 +111,11 @@ FUNCTION_NAME=transferTokensEthToBase npx hardhat run ./scripts/bridgeRandomDEX.
 ## Project Structure
 
 ```
+├── contracts/
+│   ├── RandomDEX.sol               # Base token contract
+│   └── EthRandomDEX.sol            # Ethereum token contract
+├── libraries/
+│   └── ERC20Fee.sol                # Library for fee management
 ├── scripts/
 │   └── bridgeRandomDEX.js      # Main deployment and management script
 ├── utils/

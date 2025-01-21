@@ -100,8 +100,6 @@ async function gasEstimator() {
 
 async function gasEstimatorForEth() {
   try {
-    console.log("Estimating gas from Ethereum to Base...");
-
     const executeData = "0x";
 
     const gmpParams = {
@@ -122,7 +120,6 @@ async function gasEstimatorForEth() {
       gmpParams
     );
 
-    console.log("Raw estimated gas:", gas);
     return gas;
   } catch (error) {
     handleError("Error estimating gas", error);
@@ -272,12 +269,6 @@ async function transferTokensEthToBase() {
     );
     // Get gas estimate with proper parameters
     const gasAmount = await gasEstimatorForEth();
-    console.log("Estimated gas amount:", gasAmount);
-
-    // Add 20% buffer to the gas amount
-    const gasWithBuffer = BigInt(gasAmount) + (BigInt(gasAmount) * BigInt(20) / BigInt(100));
-    console.log("Gas amount with buffer:", gasWithBuffer.toString());
-
 
     const transferTx = await interchainTokenServiceContract.interchainTransfer(
       process.env.TOKEN_ID,
@@ -285,9 +276,9 @@ async function transferTokensEthToBase() {
       process.env.BASE_RECEIVER_ADDRESS,
       ethers.parseEther("5"),
       "0x",
-      gasWithBuffer,
+      gasAmount,
       {
-        value: gasWithBuffer,
+        value: gasAmount,
         gasLimit: 3000000, // Manually set gas limit for debugging
 
       }
@@ -298,28 +289,6 @@ async function transferTokensEthToBase() {
     handleError("Error transferring tokens from Ethereum to Base", error);
   }
 }
-async function checkForToken() {
-  try {
-    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEYY);
-
-    const tokenContract = await getContractInstance(
-      process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS,
-      ethRandomDEXTokenABI,
-      signer
-    );
-    const balance = await tokenContract.balanceOf(signer.address);
-    console.log("Balance of token:", balance);
-    // Check allowance
-    const allowance = await tokenContract.allowance(
-      signer.address, // The sender's address
-      process.env.INTERCHAIN_SERVICE_CONTRACT_ADDRESS // The Axelar interchain token service
-    );
-    console.log("Current Allowance:", allowance.toString());
-  } catch (error) {
-    handleError("Error transferring tokens from Ethereum to Base", error);
-  }
-}
-
 // Handle errors
 function handleError(message, error) {
   console.error(`${message}:\n`, error.message || error);
@@ -345,9 +314,6 @@ async function main() {
       break;
     case "transferTokensBaseToEth":
       await transferTokensBaseToEth();
-      break;
-    case "checkForToken":
-      await checkForToken();
       break;
     case "transferTokensEthToBase":
       await transferTokensEthToBase();
