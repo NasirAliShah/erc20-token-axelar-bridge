@@ -1,0 +1,32 @@
+{
+  "name": "erc20-token-axelar-bridge",
+  "version": "1.0.0",
+  "description": "Create ERC20 tokens on Base and Eth blockchain and bridge tokens from one blockchain to another using axelar bridge.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NasirAliShah/erc20-token-axelar-bridge.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/NasirAliShah/erc20-token-axelar-bridge/issues"
+  },
+  "homepage": "https://github.com/NasirAliShah/erc20-token-axelar-bridge#readme",
+  "devDependencies": {
+    "@axelar-network/axelar-gmp-sdk-solidity": "^6.0.4",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "dotenv": "^16.4.7",
+    "hardhat": "^2.19.4"
+  },
+  "dependencies": {
+    "@axelar-network/axelarjs-sdk": "^0.17.0",
+    "@openzeppelin/contracts": "^5.0.1",
+    "ethers": "^6.9.1"
+  }
+}
