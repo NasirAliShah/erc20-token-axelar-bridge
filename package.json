@@ -27,6 +27,7 @@
   "dependencies": {
     "@axelar-network/axelarjs-sdk": "^0.17.0",
     "@openzeppelin/contracts": "^5.0.1",
+    "@uniswap/v2-periphery": "github:uniswap/v2-periphery",
     "ethers": "^6.9.1"
   }
 }

@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "../libraries/ERC20Fee.sol";
+import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 /**
  * @title RandomDEX
@@ -24,6 +25,9 @@ contract RandomDEX is ERC20, ERC20Permit, AccessControl, ERC20Fee {
 
     // Minimum balance required to waive transaction fees
     uint256 public feeWaiverThreshold;
+    address public UNISWAP_V2_ROUTER = 0x1689E7B1F10000AE47eBfE339a4f69dECd19F602; // Address of Uniswap V2 Router on Base Testnet
+    address public WETH = 0x4200000000000000000000000000000000000006;     // Address of WETH on Base Testnet
+    IUniswapV2Router02 private uniswapRouter;
 
     /// @dev Events to track actions in the contract
     event FeeWaiverThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
@@ -79,9 +83,11 @@ contract RandomDEX is ERC20, ERC20Permit, AccessControl, ERC20Fee {
 
         // Grant roles to the default admin
         _grantRole(DEFAULT_ADMIN_ROLE, defaultAdmin_);
-        // _grantRole(MINT_ROLE, defaultAdmin_);
+        _grantRole(MINT_ROLE, defaultAdmin_);
         // _grantRole(BURN_ROLE, defaultAdmin_);
         _grantRole(WHITELIST_MANAGER_ROLE, defaultAdmin_);
+        uniswapRouter = IUniswapV2Router02(UNISWAP_V2_ROUTER); // Create uniswap Instance
+
     }
 
     /**
@@ -128,6 +134,36 @@ contract RandomDEX is ERC20, ERC20Permit, AccessControl, ERC20Fee {
 
         emit FeeWaiverThresholdUpdated(oldThreshold, newThreshold);
     }
+    /**
+     * @notice Fetches RDX price from Uniswap and calculates ETH tax dynamically.
+     * @param sender The address initiating the transfer.
+     * @param from The sender of the RDX tokens.
+     * @param to The recipient of the RDX tokens.
+     * @param rdxAmount The amount of RDX being transferred.
+     * @return ethFee The equivalent ETH amount as tax.
+     */
+    function _calculateEthFee(
+        address sender, 
+        address from, 
+        address to, 
+        uint256 rdxAmount
+        ) public view returns (uint256 ethFee) {
+        // Get the applicable fee percentage from `_computeFee`
+        (uint256 rdxFee, ) = _computeFee(sender, from, to, rdxAmount);
+
+        if (rdxFee == 0) return 0; // No fee applicable
+
+        // Convert the RDX fee amount to ETH
+        address[] memory path = new address[](2);
+        path[0] = address(this);
+        path[1] = WETH;
+
+        uint256[] memory amounts = uniswapRouter.getAmountsOut(rdxFee, path);
+        uint256 rdxValueInEth = amounts[1]; // ETH equivalent of the fee in RDX
+
+        return rdxValueInEth;
+    }   
+
 
     /**
      * @notice Override `_update` to handle fee collection and exemptions during token transfers.
@@ -137,37 +173,34 @@ contract RandomDEX is ERC20, ERC20Permit, AccessControl, ERC20Fee {
      * @param amount The amount of tokens to transfer.
      */
     function _update(address from, address to, uint256 amount) internal virtual override(ERC20) {
-        // Skip fee calculation for minting and burning
-        if (from == address(0) || to == address(0)) {
-            super._update(from, to, amount);
-            emit TransferCompleted(from, to, amount);
-            return;
-        }
-
-        // Check for fee exemptions
-        if (
-            hasRole(DEFAULT_ADMIN_ROLE, _msgSender()) ||
-            _whitelist[from] ||
-            balanceOf(from) >= feeWaiverThreshold
-        ) {
-            super._update(from, to, amount);
-            emit TransferCompleted(from, to, amount);
-            return;
-        }
-
-        // Calculate fees using the base ERC20Fee logic
-        (uint256 fee, uint256 rest) = super._computeFee(_msgSender(), from, to, amount);
-
-        // If there's a fee, transfer it to the fee collector
-        if (fee > 0) {
-            super._transfer(from, feeCollector, fee);
-            emit FeeCharged(from, to, fee);
-        }
-
-        // Transfer the remaining amount
-        super._update(from, to, rest);
-        emit TransferCompleted(from, to, rest);
+    // Skip fee calculation for minting and burning
+    if (from == address(0) || to == address(0)) {
+        super._update(from, to, amount);
+        emit TransferCompleted(from, to, amount);
+        return;
     }
+    // Check for fee exemptions
+    if (
+        hasRole(DEFAULT_ADMIN_ROLE, _msgSender()) ||
+        _whitelist[from] ||
+        balanceOf(from) >= feeWaiverThreshold
+    ) {
+        super._update(from, to, amount);
+        emit TransferCompleted(from, to, amount);
+        return;
+    }
+    // Calculate ETH fee based on dynamic fee percentage
+    uint256 ethFee = _calculateEthFee(_msgSender(), from, to, amount);
+    require(msg.value >= ethFee, "Insufficient ETH for tax");
+    // Transfer ETH fee to feeCollector
+    (bool success, ) = feeCollector.call{value: ethFee}("");
+    require(success, "ETH transfer failed");
+    emit FeeCharged(from, to, ethFee);
+    // Transfer full RDX amount
+    super._update(from, to, amount);
+    emit TransferCompleted(from, to, amount);
+    }
+
 
     /**
      * @notice Add an address to the whitelist for fee exemptions.
