@@ -19,13 +19,13 @@
   },
   "homepage": "https://github.com/NasirAliShah/erc20-token-axelar-bridge#readme",
   "devDependencies": {
-    "@axelar-network/axelar-gmp-sdk-solidity": "^6.0.4",
+    "@axelar-network/axelar-gmp-sdk-solidity": "^6.0.6",
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "dotenv": "^16.4.7",
     "hardhat": "^2.19.4"
   },
   "dependencies": {
-    "@axelar-network/axelarjs-sdk": "^0.17.0",
+    "@axelar-network/axelarjs-sdk": "^0.17.1",
     "@openzeppelin/contracts": "^5.0.1",
     "@uniswap/v2-periphery": "github:uniswap/v2-periphery",
     "ethers": "^6.9.1"
