@@ -40,6 +40,7 @@ async function getContractInstance(contractAddress, contractABI, signer) {
 async function deployTokenManagerBase() {
   try {
     const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
       interchainTokenServiceContractABI,
@@ -53,22 +54,17 @@ async function deployTokenManagerBase() {
     const params = abiCoder.encode(
       ["bytes", "address"],
       [await signer.getAddress(), baseRandomDEXTokenAddress]
-
     );
-     const minter = ethers.zeroPadValue(await signer.getAddress(), 32);
-     const gasAmount = await gasEstimator();
-    const deployTx = await interchainTokenServiceContract.deployInterchainToken(
+
+    const deployTx = await interchainTokenServiceContract.deployTokenManager(
       salt,
-      "ethereum-sepolia",
-      "RandomDEXClaimV7",
-      "RDXCV7",
-      18, 
-      process.env.TOKEN_MANAGER_ADDRESS_BASE,
-      3000000, // Manually set gas limit for debugging
+      "",
+      LOCK_UNLOCK,
+      params,
+      ethers.parseEther("0.01")
     );
 
     console.log("Deploy Transaction Hash:", deployTx.hash);
-    return;
 
     const tokenId = await interchainTokenServiceContract.interchainTokenId(signer.address, salt);
     const tokenManagerAddress = await interchainTokenServiceContract.tokenManagerAddress(tokenId);

@@ -60,8 +60,8 @@ async function gasEstimator(sourceChain, destinationChain, tokenSymbol = "ETH") 
   }
 }
 
-// Deploy token manager for Base blockchain with new SDK features
-async function deployTokenManagerBase() {
+// register token metadata : Base 
+async function registerTokenMetadataOnBase() {
   try {
     const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
     const interchainTokenServiceContract = await getContractInstance(
@@ -73,61 +73,11 @@ async function deployTokenManagerBase() {
     // Step 1: Register token metadata with new error handling
     const registerMetadataTx = await interchainTokenServiceContract.registerTokenMetadata(
       baseRandomDEXTokenAddress,
-      ethers.parseEther("0.01"),
-      { value: ethers.parseEther("0.01") }
+      ethers.parseEther("0.0001"),
+      { value: ethers.parseEther("0.0001") }
     );
     
     console.log("Register Metadata Transaction Hash:", registerMetadataTx.hash);
-    const registerReceipt = await registerMetadataTx.wait();
-    
-    // Monitor transaction status using GMP Recovery API
-    const registerStatus = await gmpRecoveryApi.queryTransactionStatus(registerReceipt.hash);
-    console.log("Register Metadata Status:", registerStatus);
-
-    // Step 2: Generate salt and register custom token
-    const salt = "0x" + crypto.randomBytes(32).toString("hex");
-    const abiCoder = new ethers.AbiCoder();
-    const params = abiCoder.encode(
-      ["address", "address"],
-      [await signer.getAddress(), baseRandomDEXTokenAddress]
-    );
-
-    const gasAmount = await gasEstimator(
-      EvmChain.BASE_SEPOLIA,
-      EvmChain.SEPOLIA,
-      GasToken.ETH
-    );
-
-    const registerTx = await interchainTokenServiceContract.registerCustomToken(
-      salt,
-      baseRandomDEXTokenAddress,
-      LOCK_UNLOCK,
-      params,
-      { value: gasAmount }
-    );
-
-    console.log("Register Custom Token Transaction Hash:", registerTx.hash);
-    const registerCustomReceipt = await registerTx.wait();
-    
-    // Monitor custom token registration status
-    const customTokenStatus = await gmpRecoveryApi.queryTransactionStatus(registerCustomReceipt.hash);
-    console.log("Register Custom Token Status:", customTokenStatus);
-
-    const tokenId = await interchainTokenServiceContract.interchainTokenId(signer.address, salt);
-    const tokenManagerAddress = await interchainTokenServiceContract.tokenManagerAddress(tokenId);
-
-    // Store the token ID and salt for later use
-    process.env.TOKEN_ID = tokenId;
-    process.env.TOKEN_SALT = salt;
-
-    console.log(`
-      Token Manager successfully deployed on Base:
-      Salt: ${salt}
-      Token ID: ${tokenId}
-      Token Manager Address: ${tokenManagerAddress}
-    `);
-
-    return { tokenId, salt, tokenManagerAddress };
   } catch (error) {
     if (error.message.includes("ExecuteWithTokenNotSupported")) {
       console.error("Error: Token execution not supported. Please verify token configuration.");

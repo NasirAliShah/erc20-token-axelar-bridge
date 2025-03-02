@@ -14,6 +14,7 @@ require("dotenv").config();
 
 // ABIs for the contracts
 const interchainTokenServiceContractABI = require("../utils/interchainTokenServiceABIN.json");
+const interchainTokenFactoryContractABI = require("../utils/interchainTokenFactoryABI.json");
 const baseRandomDEXTokenABI = require("../utils/RandomDEXABI.json");
 const ethRandomDEXTokenABI = require("../utils/EthRandomDEXABI.json");
 
@@ -24,8 +25,8 @@ const LOCK_UNLOCK = 2;
 // Contract addresses
 const interchainTokenServiceContractAddress = process.env.INTERCHAIN_SERVICE_CONTRACT_ADDRESS;
 const baseRandomDEXTokenAddress = process.env.BASE_RANDOMDEX_CONTRACT_ADDRESS;
-const ethRandomDEXTokenAddress = process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS;
-
+const ethRandomDEXTokenAddress = process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS_V1;
+const interchainTokenFactoryContractAddress = process.env.INTERCHAIN_FACTORY_CONTRACT_ADDRESS;
 // Initialize Axelar APIs
 const api = new AxelarQueryAPI({ environment: Environment.TESTNET });
 const gmpRecoveryApi = new AxelarGMPRecoveryAPI({ environment: Environment.TESTNET });
@@ -41,26 +42,9 @@ async function getContractInstance(contractAddress, contractABI, signer) {
   return new ethers.Contract(contractAddress, contractABI, signer);
 }
 
-// Updated gas estimator with recovery API
-async function gasEstimator(sourceChain, destinationChain, tokenSymbol = "aETH") {
-  try {
-    const gas = await api.estimateGasFee({
-      source: sourceChain,
-      destination: destinationChain,
-      sourceToken: tokenSymbol,
-      amount: "1000000", // 1M units
-      destinationToken: tokenSymbol
-    });
-    return gas;
-  } catch (error) {
-    handleError("Error estimating gas", error);
-    throw error;
-  }
-}
-
-// Deploy token manager for Base blockchain
-async function deployTokenManagerBase() {
-  try {
+// Register token metadata for Base blockchain
+async function registerTokenMetadataOnBase() {
+  try{
     const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
@@ -68,198 +52,274 @@ async function deployTokenManagerBase() {
       signer
     );
 
-    const salt = "0x" + crypto.randomBytes(32).toString("hex");
-    const abiCoder = new ethers.AbiCoder();
-    const params = abiCoder.encode(
-      ["address", "address"],
-      [await signer.getAddress(), baseRandomDEXTokenAddress]
-    );
-
-    const gasAmount = await gasEstimator(
-      "base-sepolia",
-      "ethereum-sepolia",
-      "aETH"
-    );
-
-    const registerTx = await interchainTokenServiceContract.registerCustomToken(
-      salt,
+    // Step 1: Register token metadata with new error handling
+    const registerMetadataTx = await interchainTokenServiceContract.registerTokenMetadata(
       baseRandomDEXTokenAddress,
-      LOCK_UNLOCK,
-      params,
-      { value: gasAmount }
+      ethers.parseEther("0.0001"),
+      { value: ethers.parseEther("0.0001") }
     );
-
-    console.log("Register Custom Token Transaction Hash:", registerTx.hash);
-    const receipt = await registerTx.wait();
-
-    const tokenId = await interchainTokenServiceContract.interchainTokenId(signer.address, salt);
-    const tokenManagerAddress = await interchainTokenServiceContract.tokenManagerAddress(tokenId);
-
-    console.log(`
-      Token Manager deployed on Base:
-      Salt: ${salt}
-      Token ID: ${tokenId}
-      Token Manager Address: ${tokenManagerAddress}
-    `);
-
-    return { tokenId, salt, tokenManagerAddress };
+    
+    console.log("Register Metadata Transaction Hash:", registerMetadataTx.hash);
   } catch (error) {
-    handleError("Error deploying Token Manager on Base", error);
+    if (error.message.includes("ExecuteWithTokenNotSupported")) {
+      console.error("Error: Token execution not supported. Please verify token configuration.");
+    } else if (error.message.includes("GatewayToken")) {
+      console.error("Error: Invalid gateway token. Please check token address.");
+    } else {
+      handleError("Error deploying Token Manager on Base", error);
+    }
     throw error;
   }
 }
-
-// Deploy token manager for Ethereum blockchain
-async function deployRemoteTokenManager() {
-  try {
-    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+// Register token metadata for Ethereum blockchain
+async function registerTokenMetadataOnEth() {
+  try{const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEY);
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
       interchainTokenServiceContractABI,
       signer
     );
 
-    const abiCoder = new ethers.AbiCoder();
-    const linkParams = abiCoder.encode(
-      ["address", "address"],
-      [await signer.getAddress(), ethRandomDEXTokenAddress]
+    // Step 1: Register token metadata with new error handling
+    const registerMetadataTx = await interchainTokenServiceContract.registerTokenMetadata(
+      ethRandomDEXTokenAddress,
+      ethers.parseEther("0.0001"),
+      { value: ethers.parseEther("0.0001") }
     );
-
-    const gasAmount = await gasEstimator(
-      "base-sepolia",
-      "ethereum-sepolia",
-      "aETH"
-    );
-
-    const linkTx = await interchainTokenServiceContract.linkToken(
-      process.env.TOKEN_SALT,
-      "ethereum-sepolia",
-      ethers.zeroPadValue(ethRandomDEXTokenAddress, 32),
-      MINT_BURN,
-      linkParams,
-      gasAmount,
-      { value: gasAmount }
-    );
-
-    console.log("Link Token Transaction Hash:", linkTx.hash);
-    await linkTx.wait();
-
-    const tokenId = process.env.TOKEN_ID;
-    const tokenManagerAddress = await interchainTokenServiceContract.tokenManagerAddress(tokenId);
-
-    console.log(`
-      Token Manager deployed on Ethereum:
-      Token ID: ${tokenId}
-      Token Manager Address: ${tokenManagerAddress}
-    `);
-
-    return { tokenId, tokenManagerAddress };
+    
+    console.log("Register Metadata Transaction Hash:", registerMetadataTx.hash);
   } catch (error) {
-    handleError("Error deploying Token Manager on Ethereum", error);
+    if (error.message.includes("ExecuteWithTokenNotSupported")) {
+      console.error("Error: Token execution not supported. Please verify token configuration.");
+    } else if (error.message.includes("GatewayToken")) {
+      console.error("Error: Invalid gateway token. Please check token address.");
+    } else {
+      handleError("Error deploying Token Manager on Base", error);
+    }
     throw error;
   }
 }
 
-// Grant mint/burn access on Ethereum
+async function registerCustomTokenOnBase() {
+   // Generate random salt
+   const salt = "0x" + crypto.randomBytes(32).toString("hex");
+   console.log("salt",salt);
+return;
+   // Get a signer to sign the transaction
+   const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+  
+   // Get the interchainTokenFactory contract instance
+   const interchainTokenFactoryContract = await getContractInstance(
+     interchainTokenFactoryContractAddress,
+     interchainTokenFactoryContractABI,
+     signer,
+   );
+ 
+   // Register token metadata
+   const deployTxData = await interchainTokenFactoryContract.registerCustomToken(
+     salt, // salt
+     baseRandomDEXTokenAddress, // token address
+     LOCK_UNLOCK, // token management type
+     "0x9D3583cBeB5542287B635Bf09D693C8106284C27", //  the testnet address for token manager
+     { value: ethers.parseEther("0.001") },
+   );
+ 
+   console.log(`
+     Transaction Hash: ${deployTxData.hash},
+     salt: ${salt}`);
+}
+
+async function linkCustomToken() {
+  // Get a signer to sign the transaction
+  const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+  // Get the interchainTokenFactory contract instance
+  const interchainTokenFactoryContract = await getContractInstance(
+    interchainTokenFactoryContractAddress,
+    interchainTokenFactoryContractABI,
+    signer,
+  );
+
+  // Register token metadata
+  const deployTxData = await interchainTokenFactoryContract.linkToken(
+    process.env.TOKEN_SALT_V1, // salt, same as previously used
+    "ethereum-sepolia", // destination chain
+    ethRandomDEXTokenAddress, // destination token address
+    MINT_BURN, // token manager type
+    "0x9D3583cBeB5542287B635Bf09D693C8106284C27", //  the address of the operator - linkParams token manager
+    ethers.parseEther("0.001"), // gas value
+    { value: ethers.parseEther("0.001") },
+  );
+
+  console.log(`Transaction Hash: ${deployTxData.hash}`);
+}
+async function getTokenManagerAddress() {
+  // Get a signer to sign the transaction
+  const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+
+  // Get the InterchainTokenService contract instance
+  const interchainTokenServiceContract = await getContractInstance(
+    interchainTokenServiceContractAddress,
+    interchainTokenServiceContractABI,
+    signer,
+  );
+
+  // Register token metadata
+  const tokenId = await interchainTokenServiceContract.interchainTokenId(
+    "0x9D3583cBeB5542287B635Bf09D693C8106284C27", // sender
+    process.env.TOKEN_SALT_V1, // salt, same as previously used
+  );
+
+  const tokenManagerAddress =
+    await interchainTokenServiceContract.tokenManagerAddress(tokenId);
+
+  console.log(`
+    Token Manager Address: ${tokenManagerAddress},
+    Token ID: ${tokenId}`);
+}
+// Transfer mint access on all chains to the Expected Token Manager : BSC
 async function transferMintAccessToTokenManagerOnEth() {
   try {
     const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEY);
+
     const tokenContract = await getContractInstance(
       ethRandomDEXTokenAddress,
       ethRandomDEXTokenABI,
       signer
     );
 
-    const tokenManagerAddress = process.env.TOKEN_MANAGER_ETH_ADDRESS;
-
-    // Grant MINT_ROLE
     const minterRole = await tokenContract.MINT_ROLE();
-    console.log("Granting MINT_ROLE to token manager:", tokenManagerAddress);
-    const grantMinterTx = await tokenContract.grantRole(minterRole, tokenManagerAddress);
-    await grantMinterTx.wait();
-
-    // Grant BURN_ROLE
     const burnRole = await tokenContract.BURN_ROLE();
-    console.log("Granting BURN_ROLE to token manager:", tokenManagerAddress);
-    const grantBurnTx = await tokenContract.grantRole(burnRole, tokenManagerAddress);
-    await grantBurnTx.wait();
 
-    console.log("Successfully granted MINT_ROLE and BURN_ROLE to token manager");
+    const grantMinterTx = await tokenContract.grantRole(
+      minterRole,
+      process.env.TOKEN_MANAGER_ADDRESS // Token Manager Address for Ethereum
+    );
+    console.log("Grant Minter Role Transaction Hash:", grantMinterTx.hash);
+
+    const grantBurnTx = await tokenContract.grantRole(
+      burnRole,
+      process.env.TOKEN_MANAGER_ADDRESS // Token Manager Address for Ethereum
+    );
+    console.log("Grant Burn Role Transaction Hash:", grantBurnTx.hash);
   } catch (error) {
-    handleError("Error granting roles to token manager on Ethereum", error);
-    throw error;
+    handleError("Error transferring mint access on Ethereum", error);
   }
 }
 
-// Approve tokens for transfer on Base
-async function approveTokensOnBase() {
+async function transferTokens() {
   try {
     const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+    const signerAddress = await signer.getAddress();
+
+    // First check token balance
     const tokenContract = await getContractInstance(
       baseRandomDEXTokenAddress,
       baseRandomDEXTokenABI,
       signer
     );
 
-    const tokenManagerAddress = process.env.TOKEN_MANAGER_BASE_ADDRESS;
-    const maxAmount = ethers.MaxUint256;
+    const balance = await tokenContract.balanceOf(signerAddress);
+    const transferAmount = ethers.parseEther("10");
+    
+    console.log("Current token balance:", ethers.formatEther(balance));
+    console.log("Transfer amount:", ethers.formatEther(transferAmount));
 
-    console.log("Approving tokens for token manager:", tokenManagerAddress);
-    const approveTx = await tokenContract.approve(tokenManagerAddress, maxAmount);
+    if (balance < transferAmount) {
+      throw new Error(`Insufficient token balance. Have ${ethers.formatEther(balance)}, need ${ethers.formatEther(transferAmount)}`);
+    }
+
+    console.log("Approving tokens for transfer...");
+    const approveTx = await tokenContract.approve(
+      interchainTokenServiceContractAddress,
+      transferAmount
+    );
     await approveTx.wait();
+    console.log("Approval confirmed!");
 
-    console.log("Successfully approved tokens for token manager");
-  } catch (error) {
-    handleError("Error approving tokens on Base", error);
-    throw error;
-  }
-}
+    // Verify allowance
+    const allowance = await tokenContract.allowance(signerAddress, interchainTokenServiceContractAddress);
+    console.log("Current allowance:", ethers.formatEther(allowance));
 
-// Transfer tokens from Base to Ethereum
-async function transferTokensBaseToEth() {
-  try {
-    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
       interchainTokenServiceContractABI,
       signer
     );
 
-    const amount = process.env.TRANSFER_AMOUNT || ethers.parseEther("1.0");
-    const gasAmount = await gasEstimator(
-      "base-sepolia",
-      "ethereum-sepolia",
-      "aETH"
-    );
+    // Use higher gas amount
+    const gasAmount = ethers.parseEther("0.005"); // Increased gas amount
+    console.log("Using gas amount:", ethers.formatEther(gasAmount));
 
-    const destinationAddress = ethers.zeroPadValue(await signer.getAddress(), 32);
-    const metadata = "0x";
+    const destinationAddress = ethers.getAddress(process.env.ETHEREUM_RECEIVER_ADDRESS_V1);
+    console.log("Initiating transfer with params:");
+    console.log("Token ID:", process.env.TOKEN_ID_V1);
+    console.log("Destination Chain:", "ethereum-sepolia");
+    console.log("Receiver:", destinationAddress);
+    console.log("Amount:", ethers.formatEther(transferAmount));
 
+    // Prepare the transfer transaction
     const transferTx = await interchainTokenServiceContract.interchainTransfer(
-      process.env.TOKEN_ID,
+      process.env.TOKEN_ID_V1,
       "ethereum-sepolia",
       destinationAddress,
-      amount,
-      metadata,
+      transferAmount,
+      "0x",
+      gasAmount,
+      {
+        value: gasAmount,
+        gasLimit: 500000  // Reduced gas limit to a more reasonable value
+      }
+    );
+
+
+    console.log("Transfer Transaction Hash:", transferTx.hash);
+    
+    // Wait for transaction confirmation
+    const receipt = await transferTx.wait();
+    console.log("Transfer confirmed in block:", receipt.blockNumber);
+    
+  } catch (error) {
+    handleError("Error transferring tokens from Base to Ethereum", error);
+    // Log more detailed error information
+    console.error("Detailed error:", {
+      message: error.message,
+      code: error.code,
+      data: error.data,
+      transaction: error.transaction
+    });
+  }
+}
+
+
+// Transfer tokens from Base to Ethereum
+async function transferTokensBaseToEth() {
+  try {
+    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+
+    const interchainTokenServiceContract = await getContractInstance(
+      interchainTokenServiceContractAddress,
+      interchainTokenServiceContractABI,
+      signer
+    );
+
+    const gasAmount = await gasEstimatorForEth();
+    console.log(`Gas amount: ${gasAmount}`);
+
+    const transferTx = await interchainTokenServiceContract.interchainTransfer(
+      process.env.TOKEN_ID_V1,
+      "ethereum-sepolia",
+      process.env.ETHEREUM_RECEIVER_ADDRESS,
+      ethers.parseEther("10"),
+      "0x",
       gasAmount,
       { value: gasAmount }
     );
 
     console.log("Transfer Transaction Hash:", transferTx.hash);
-    const receipt = await transferTx.wait();
-
-    // Monitor transfer status
-    const transferStatus = await gmpRecoveryApi.queryTransactionStatus(receipt.hash);
-    console.log("Transfer Status:", transferStatus);
-
-    console.log(`Successfully initiated transfer of ${amount} tokens from Base to Ethereum`);
-    return receipt.hash;
   } catch (error) {
     handleError("Error transferring tokens from Base to Ethereum", error);
-    throw error;
   }
 }
-
 // Transfer tokens from Ethereum to Base
 async function transferTokensEthToBase() {
   try {
@@ -330,6 +390,79 @@ async function checkGasEstimation() {
     throw error;
   }
 }
+// Updated gas estimator with recovery API
+async function gasEstimator(sourceChain, destinationChain, tokenSymbol = "ETH") {
+  try {
+    // Map chain names to Axelar chain identifiers
+    const chainMapping = {
+      'base-sepolia': 'base',
+      'ethereum-sepolia': 'ethereum'
+    };
+
+    const source = chainMapping[sourceChain] || sourceChain;
+    const destination = chainMapping[destinationChain] || destinationChain;
+
+    const gas = await api.estimateGasFee(
+      source,
+      destination,
+      tokenSymbol,
+      1000000 // Default gas amount
+    );
+    return gas;
+  } catch (error) {
+    handleError("Error estimating gas", error);
+    throw error;
+  }
+}
+async function gasEstimatorForEth() {
+  try {
+    const executeData = "0x";
+
+    const gmpParams = {
+      destinationContractAddress: process.env.BASE_RECEIVER_ADDRESS,
+      sourceContractAddress: process.env.ETH_SENDER_ADDRESS,
+      tokenSymbol: "ETH",
+      transferAmount: ethers.parseEther("5").toString()
+    };
+
+    const gas = await api.estimateGasFee(
+      EvmChain.SEPOLIA,
+      EvmChain.BASE_SEPOLIA,
+      3000000,  // Increased gas limit
+      1.3,      // Increased multiplier for better estimation
+      GasToken.ETH,
+      "0",
+      executeData,
+      gmpParams
+    );
+
+    return gas;
+  } catch (error) {
+    handleError("Error estimating gas", error);
+    console.error("Detailed gas estimation error:", error);
+    throw error;
+  }
+}
+
+async function approveTokensOnBase() {
+  try {
+    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
+
+    const tokenContract = await getContractInstance(
+      baseRandomDEXTokenAddress,
+      baseRandomDEXTokenABI,
+      signer
+    );
+
+    const approveTx = await tokenContract.approve(
+      interchainTokenServiceContractAddress,
+      ethers.parseEther("500")
+    );
+    console.log("Approve Transaction Hash:", approveTx.hash);
+  } catch (error) {
+    handleError("Error approving tokens on Base", error);
+  }
+}
 
 // Error handler
 function handleError(message, error) {
@@ -347,26 +480,41 @@ function handleError(message, error) {
 async function main() {
   const functionName = process.env.FUNCTION_NAME;
   switch (functionName) {
-    case "deployTokenManagerBase":
-      await deployTokenManagerBase();
+    case "registerTokenMetadataOnBase":
+      await registerTokenMetadataOnBase();
       break;
-    case "deployRemoteTokenManager":
-      await deployRemoteTokenManager();
+    case "registerTokenMetadataOnEth":
+      await registerTokenMetadataOnEth();
+      break;
+    case "registerCustomTokenOnBase":
+      await registerCustomTokenOnBase();
+      break;
+    case "linkCustomToken":
+      await linkCustomToken();
+      break;
+    case "getTokenManagerAddress":
+      await getTokenManagerAddress();
       break;
     case "transferMintAccessToTokenManagerOnEth":
       await transferMintAccessToTokenManagerOnEth();
       break;
-    case "approveTokensOnBase":
-      await approveTokensOnBase();
+    case "deployRemoteTokenManager":
+      await deployRemoteTokenManager();
       break;
     case "transferTokensBaseToEth":
       await transferTokensBaseToEth();
+      break;
+    case "transferTokens":
+      await transferTokens();
       break;
     case "transferTokensEthToBase":
       await transferTokensEthToBase();
       break;
     case "checkGasEstimation":
       await checkGasEstimation();
+      break;
+    case "approveTokensOnBase":
+      await approveTokensOnBase();
       break;
     default:
       console.error(`Unknown function: ${functionName}`);
@@ -376,10 +524,8 @@ async function main() {
 
 // Export functions for testing and individual usage
 module.exports = {
-  deployTokenManagerBase,
-  deployRemoteTokenManager,
-  transferMintAccessToTokenManagerOnEth,
-  approveTokensOnBase,
+  registerTokenMetadataOnBase,
+  registerTokenMetadataOnEth,
   transferTokensBaseToEth,
   transferTokensEthToBase,
   main
