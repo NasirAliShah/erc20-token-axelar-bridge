@@ -13,7 +13,7 @@ const {
 require("dotenv").config();
 
 // ABIs for the contracts
-const interchainTokenServiceContractABI = require("../utils/interchainTokenServiceABIN.json");
+const interchainTokenServiceContractABI = require("../utils/interchainTokenServiceABI.json");
 const interchainTokenFactoryContractABI = require("../utils/interchainTokenFactoryABI.json");
 const baseRandomDEXTokenABI = require("../utils/RandomDEXABI.json");
 const ethRandomDEXTokenABI = require("../utils/EthRandomDEXABI.json");
@@ -25,7 +25,7 @@ const LOCK_UNLOCK = 2;
 // Contract addresses
 const interchainTokenServiceContractAddress = process.env.INTERCHAIN_SERVICE_CONTRACT_ADDRESS;
 const baseRandomDEXTokenAddress = process.env.BASE_RANDOMDEX_CONTRACT_ADDRESS;
-const ethRandomDEXTokenAddress = process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS_V1;
+const ethRandomDEXTokenAddress = process.env.ETH_RANDOMDEX_CONTRACT_ADDRESS;
 const interchainTokenFactoryContractAddress = process.env.INTERCHAIN_FACTORY_CONTRACT_ADDRESS;
 // Initialize Axelar APIs
 const api = new AxelarQueryAPI({ environment: Environment.TESTNET });
@@ -103,8 +103,6 @@ async function registerTokenMetadataOnEth() {
 async function registerCustomTokenOnBase() {
    // Generate random salt
    const salt = "0x" + crypto.randomBytes(32).toString("hex");
-   console.log("salt",salt);
-return;
    // Get a signer to sign the transaction
    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
   
@@ -120,7 +118,7 @@ return;
      salt, // salt
      baseRandomDEXTokenAddress, // token address
      LOCK_UNLOCK, // token management type
-     "0x9D3583cBeB5542287B635Bf09D693C8106284C27", //  the testnet address for token manager
+     signer.address, // Address who has deployed the rdx token contract  
      { value: ethers.parseEther("0.001") },
    );
  
@@ -141,11 +139,11 @@ async function linkCustomToken() {
 
   // Register token metadata
   const deployTxData = await interchainTokenFactoryContract.linkToken(
-    process.env.TOKEN_SALT_V1, // salt, same as previously used
+    process.env.TOKEN_SALT, // salt, same as previously used
     "ethereum-sepolia", // destination chain
     ethRandomDEXTokenAddress, // destination token address
     MINT_BURN, // token manager type
-    "0x9D3583cBeB5542287B635Bf09D693C8106284C27", //  the address of the operator - linkParams token manager
+    signer.address, // Address who has deployed the rdx token contract 
     ethers.parseEther("0.001"), // gas value
     { value: ethers.parseEther("0.001") },
   );
@@ -156,17 +154,23 @@ async function getTokenManagerAddress() {
   // Get a signer to sign the transaction
   const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
 
-  // Get the InterchainTokenService contract instance
+  // Get the interchainTokenFactory contract instance
+  const interchainTokenFactoryContract = await getContractInstance(
+    interchainTokenFactoryContractAddress,
+    interchainTokenFactoryContractABI,
+    signer,
+  );  
   const interchainTokenServiceContract = await getContractInstance(
     interchainTokenServiceContractAddress,
     interchainTokenServiceContractABI,
-    signer,
+    signer
   );
 
+
   // Register token metadata
-  const tokenId = await interchainTokenServiceContract.interchainTokenId(
-    "0x9D3583cBeB5542287B635Bf09D693C8106284C27", // sender
-    process.env.TOKEN_SALT_V1, // salt, same as previously used
+  const tokenId = await interchainTokenFactoryContract.linkedTokenId(
+    signer.address, // sender
+    process.env.TOKEN_SALT, // salt, same as previously used
   );
 
   const tokenManagerAddress =
@@ -290,7 +294,44 @@ async function transferTokens() {
   }
 }
 
+async function approveTokensOnBase() {
+  try {
+    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
 
+    const tokenContract = await getContractInstance(
+      baseRandomDEXTokenAddress,
+      baseRandomDEXTokenABI,
+      signer
+    );
+
+    const approveTx = await tokenContract.approve(
+      interchainTokenServiceContractAddress,
+      ethers.parseEther("500")
+    );
+    console.log("Approve Transaction Hash:", approveTx.hash);
+  } catch (error) {
+    handleError("Error approving tokens on Base", error);
+  }
+}
+async function approveTokensOnEth() {
+  try {
+    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEYY);
+
+    const tokenContract = await getContractInstance(
+      ethRandomDEXTokenAddress,
+      ethRandomDEXTokenABI,
+      signer
+    );
+
+    const approveTx = await tokenContract.approve(
+      interchainTokenServiceContractAddress,
+      ethers.parseEther("500")
+    );
+    console.log("Approve Transaction Hash:", approveTx.hash);
+  } catch (error) {
+    handleError("Error approving tokens on Ethereum", error);
+  }
+}
 // Transfer tokens from Base to Ethereum
 async function transferTokensBaseToEth() {
   try {
@@ -302,11 +343,11 @@ async function transferTokensBaseToEth() {
       signer
     );
 
-    const gasAmount = await gasEstimatorForEth();
+    const gasAmount = await gasEstimatorForEth("10");
     console.log(`Gas amount: ${gasAmount}`);
 
     const transferTx = await interchainTokenServiceContract.interchainTransfer(
-      process.env.TOKEN_ID_V1,
+      process.env.TOKEN_ID,
       "ethereum-sepolia",
       process.env.ETHEREUM_RECEIVER_ADDRESS,
       ethers.parseEther("10"),
@@ -323,28 +364,23 @@ async function transferTokensBaseToEth() {
 // Transfer tokens from Ethereum to Base
 async function transferTokensEthToBase() {
   try {
-    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEY);
+    const signer = await getSigner(process.env.ETHEREUM_TESTNET_RPC, process.env.PRIVATE_KEYY);
     const interchainTokenServiceContract = await getContractInstance(
       interchainTokenServiceContractAddress,
       interchainTokenServiceContractABI,
       signer
     );
 
-    const amount = process.env.TRANSFER_AMOUNT || ethers.parseEther("1.0");
-    const gasAmount = await gasEstimator(
-      "ethereum-sepolia",
-      "base-sepolia",
-      "aETH"
-    );
-
-    const destinationAddress = ethers.zeroPadValue(await signer.getAddress(), 32);
+    const gasAmount = await gasEstimatorForEth("5");
+    console.log(`Gas amount: ${gasAmount}`);
+    
     const metadata = "0x";
 
     const transferTx = await interchainTokenServiceContract.interchainTransfer(
       process.env.TOKEN_ID,
       "base-sepolia",
-      destinationAddress,
-      amount,
+      "0x0fF019f527aDCF3d24A90086A5B0ed52eCE80fA8",
+      ethers.parseEther("5"),
       metadata,
       gasAmount,
       { value: gasAmount }
@@ -353,11 +389,8 @@ async function transferTokensEthToBase() {
     console.log("Transfer Transaction Hash:", transferTx.hash);
     const receipt = await transferTx.wait();
 
-    // Monitor transfer status
-    const transferStatus = await gmpRecoveryApi.queryTransactionStatus(receipt.hash);
-    console.log("Transfer Status:", transferStatus);
-
-    console.log(`Successfully initiated transfer of ${amount} tokens from Ethereum to Base`);
+  
+    console.log(`Successfully initiated transfer of tokens from Ethereum to Base`);
     return receipt.hash;
   } catch (error) {
     handleError("Error transferring tokens from Ethereum to Base", error);
@@ -414,7 +447,7 @@ async function gasEstimator(sourceChain, destinationChain, tokenSymbol = "ETH") 
     throw error;
   }
 }
-async function gasEstimatorForEth() {
+async function gasEstimatorForEth(amount) {
   try {
     const executeData = "0x";
 
@@ -422,7 +455,7 @@ async function gasEstimatorForEth() {
       destinationContractAddress: process.env.BASE_RECEIVER_ADDRESS,
       sourceContractAddress: process.env.ETH_SENDER_ADDRESS,
       tokenSymbol: "ETH",
-      transferAmount: ethers.parseEther("5").toString()
+      transferAmount: ethers.parseEther(amount).toString()
     };
 
     const gas = await api.estimateGasFee(
@@ -444,25 +477,6 @@ async function gasEstimatorForEth() {
   }
 }
 
-async function approveTokensOnBase() {
-  try {
-    const signer = await getSigner(process.env.BASE_SEPOLIA_RPC_URL, process.env.PRIVATE_KEY);
-
-    const tokenContract = await getContractInstance(
-      baseRandomDEXTokenAddress,
-      baseRandomDEXTokenABI,
-      signer
-    );
-
-    const approveTx = await tokenContract.approve(
-      interchainTokenServiceContractAddress,
-      ethers.parseEther("500")
-    );
-    console.log("Approve Transaction Hash:", approveTx.hash);
-  } catch (error) {
-    handleError("Error approving tokens on Base", error);
-  }
-}
 
 // Error handler
 function handleError(message, error) {
@@ -510,12 +524,17 @@ async function main() {
     case "transferTokensEthToBase":
       await transferTokensEthToBase();
       break;
+
     case "checkGasEstimation":
       await checkGasEstimation();
       break;
     case "approveTokensOnBase":
       await approveTokensOnBase();
       break;
+    case "approveTokensOnEth":
+      await approveTokensOnEth();
+      break;
+      
     default:
       console.error(`Unknown function: ${functionName}`);
       process.exitCode = 1;

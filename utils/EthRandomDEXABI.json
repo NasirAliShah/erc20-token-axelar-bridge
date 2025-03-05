@@ -61,14 +61,14 @@
         "type": "uint256"
       },
       {
-        "internalType": "uint256",
-        "name": "maxSupply_",
-        "type": "uint256"
-      },
-      {
         "internalType": "address",
         "name": "uniswapRouter_",
         "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "listingTimestamp_",
+        "type": "uint256"
       }
     ],
     "stateMutability": "nonpayable",
@@ -309,7 +309,17 @@
   },
   {
     "inputs": [],
+    "name": "SupervisedTransferRestricted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "SwapFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TokenAlreadyListed",
     "type": "error"
   },
   {
@@ -496,6 +506,19 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "ListingTimestampUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": true,
         "internalType": "bytes32",
         "name": "role",
@@ -654,6 +677,19 @@
     ],
     "name": "TransferCompleted",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "ALLOWED_TRANSFER_FROM_ROLE",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [],
@@ -1052,7 +1088,7 @@
   },
   {
     "inputs": [],
-    "name": "maxSupply",
+    "name": "listingTimestamp",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1208,6 +1244,19 @@
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "setListingTimestamp",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes4",
         "name": "interfaceId",
         "type": "bytes4"
@@ -1278,17 +1327,17 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "from",
+        "name": "sender",
         "type": "address"
       },
       {
         "internalType": "address",
-        "name": "to",
+        "name": "recipient",
         "type": "address"
       },
       {
         "internalType": "uint256",
-        "name": "value",
+        "name": "amount",
         "type": "uint256"
       }
     ],
